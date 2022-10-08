@@ -1,0 +1,510 @@
+---
+title: "DA Assignment"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+# Prerequisites
+
+## Import packages.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(ggplot2)
+library(ggpubr)
+
+setwd('C:/Personal/Data Analyst Job - Assingment/')
+```
+## Load Data.
+
+```{r}
+df <- read_excel("Dataset_DA_2022.xlsx")
+
+glimpse(df)
+
+```
+
+## Data Cleaning
+
+Both 'started_at' and 'cancelled_at' fields types are 'char'
+
+```{r}
+# Convert 'started_at' and 'cancelled_at' fields types to date
+df <- mutate(df, 
+             started_at = as_date(started_at, format = '%d/%m/%Y'),
+             cancelled_at = as_date(cancelled_at, format = '%d/%m/%Y'))
+
+glimpse(df)
+```
+Issue: It seems date field records are consisting with different formats.
+
+```{r}
+# Convert the excel file to a csv and load data from csv
+df <- read_csv("Dataset_DA_2022.csv")
+
+# Convert 'started_at' and 'cancelled_at' fields types to date 
+df <- mutate(df, 
+             started_at = as_date(started_at, format = '%d/%m/%Y'),
+             cancelled_at = as_date(cancelled_at, format = '%d/%m/%Y'))
+
+glimpse(df)
+#tail(df, 100)
+```
+Check for null values
+
+```{r}
+dim(df)
+
+df %>% filter(is.na(CUID))
+
+```
+
+There are 1,020,251 null records from field CUID
+
+```{r}
+# Removing null records
+df <-  df %>% filter(!is.na(CUID))
+
+
+# Verify null record removal
+df %>% filter(is.na(CUID)) %>% count()
+df %>% filter(is.na(subscription)) %>% count()
+df %>% filter(is.na(started_at)) %>% count()
+df %>% filter(is.na(cancelled_at)) %>% count()
+
+dim(df)
+```
+Null values removed
+8368 records with data.
+
+# Feature Engineering
+
+## Check subscription types
+
+```{r}
+df %>% select(subscription) %>% unique()
+```
+
+There are 6 subscription types in the data sets.
+
+```{r}
+df
+
+summary(df)
+```
+## Introduce new features
+
+```{r}
+# Introduce new feilds
+# usage_days (cancelled_at - started_at)
+# started_month
+df <- mutate(df, 
+             usage_days = difftime(cancelled_at, started_at, units = "days"),
+             started_month = month(ymd(started_at), 
+                                   label = FALSE, 
+                                   abbr = FALSE),
+             started_month_nm = month(ymd(started_at), 
+                                      label = TRUE, 
+                                      abbr = FALSE))
+
+df$usage_days <- as.numeric(df$usage_days, units="days")
+df$usage_months <- as.numeric(ceiling(df$usage_days / 30), units = "month")
+
+summary(df)
+```
+New fields: 
+usage_days - usage period in days
+usage_months - usage period in months
+started_month - subscribed month
+started_month_nm - subscribed month name
+
+```{r}
+summary(df)
+```
+# Detailed Analysis
+
+## 1) Sales
+
+```{r}
+subscriptions <- df %>% group_by(subscription) %>% 
+  count(name = 'No_of_subscriptions')
+subscriptions
+
+total_subs <- as.numeric(count(df))
+ 
+subscriptions = subscriptions %>% mutate(
+  subscribed_percentage = No_of_subscriptions / total_subs*100)
+
+ggplot(subscriptions, aes(y = reorder(subscription, No_of_subscriptions), 
+                        x = subscribed_percentage))+ 
+  geom_bar(stat = "summary")+
+  scale_x_continuous(position = "top") +
+  geom_text(aes(label = paste0(round(subscribed_percentage,1), " %")), colour = "white", hjust = 1.5)+
+  scale_fill_manual(name = "Reviews", values=c("#F7C815","grey50")) +
+  labs(title = "Subscriptions",
+       x = NULL,
+       y = NULL) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    plot.caption = element_text(face = 'italic'),
+    panel.grid.major = element_line('white', size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.ontop = FALSE
+  )
+
+#ggsave("1_overall_subcriptions.jpg", width = 10, height = 8, units = "cm")
+```
+It is a clear highlight that, 'Plus-monthly' is the most commonly subscribed package.
+
+```{r}
+df %>% group_by(subscription) %>% count()
+```
+
+This shows that only 'Plus-monthly', 'Growth-monthly' and 'Plus-yearly' subscription types have a minimal of 100 subscriptions.
+Other subscription types not even exceed 10 subscriptions.
+
+### Overall subscriptions by month
+
+```{r}
+monthly_subscriptions3 <- df %>% 
+  group_by(started_month_nm) %>% 
+  count() %>% 
+  arrange(started_month_nm)
+
+total_subs <- as.numeric(count(df))
+ 
+monthly_subscriptions3 = monthly_subscriptions3 %>% mutate(
+  subscribed_percentage = n / total_subs*100)
+
+
+monthly_subscriptions3
+
+#sum(monthly_subscriptions3$subscribed_percentage)
+
+```
+
+```{r}
+ggplot(monthly_subscriptions3, aes(y = subscribed_percentage, 
+                      x = started_month_nm))+ 
+  geom_bar(stat = "summary")+
+  labs(title = "Subscriptions by Month",
+       x = NULL,
+       y = 'Percentage %') +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    plot.caption = element_text(face = 'italic'),
+    panel.grid.major = element_line('white', size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.ontop = TRUE
+  )
+
+#ggsave("2_subscriptions_by_month.jpg", width = 16, height = 12, units = "cm")
+```
+Overall it indicate a good subscription sales from January to April. Then there is a considerable drop of sales.
+
+### Subscriptions by Subscription Types
+
+```{r}
+monthly_subscriptions <- df %>% filter((subscription == 'Growth-monthly')|
+                                       (subscription == 'Plus-monthly')|
+                                       (subscription == 'Plus-yearly')) %>%
+  group_by(started_month_nm, subscription) %>%
+  count(subscription, name = "n") %>%
+  pivot_wider(names_from = subscription, values_from = n, values_fill = 0) %>%
+  ungroup()
+
+monthly_subscriptions <-data.frame(monthly_subscriptions, row.names = 1)
+
+growth_m_sum <- sum(monthly_subscriptions$Growth.monthly)
+plus_m_sum <- sum(monthly_subscriptions$Plus.monthly)
+plus_y_sum <- sum(monthly_subscriptions$Plus.yearly)
+
+monthly_subscriptions$Growth.monthly <- monthly_subscriptions$Growth.monthly / growth_m_sum * 100
+monthly_subscriptions$Plus.monthly <- monthly_subscriptions$Plus.monthly / plus_m_sum * 100
+monthly_subscriptions$Plus.yearly <- monthly_subscriptions$Plus.yearly / plus_y_sum * 100
+
+
+head(monthly_subscriptions)
+
+ggballoonplot(monthly_subscriptions, fill = "value", size.range = c(1, 8)) +
+  scale_fill_viridis_c(option = "C")+
+  guides(size = FALSE) + 
+  labs(title = "Percentages: Subcriptions (Min 100 subscriptions)",
+       fill = 'Percentage (%)',
+       x = NULL,
+       y = NULL)
+```
+This shows the percentages of sales per each subscription type (top 3).
+But this is not the best graphical representation.
+
+Another approach.
+
+```{r}
+monthly_subscriptions2 <- df %>% 
+  filter((subscription == 'Growth-monthly')| (subscription == 'Plus-monthly')| (subscription == 'Plus-yearly')) %>%
+  group_by(subscription, started_month_nm) %>% 
+  count() %>% 
+  arrange(subscription, started_month_nm)
+ 
+monthly_subscriptions2 = monthly_subscriptions2 %>% mutate(
+  subscribed_percentage = case_when(subscription == "Growth-monthly"~ n/growth_m_sum*100,
+                                    subscription == "Plus-monthly"~ n/ plus_m_sum * 100,
+                                    subscription == "Plus-yearly"~ n/plus_y_sum * 100)
+ )
+
+
+monthly_subscriptions2
+
+```
+
+```{r}
+ggplot(monthly_subscriptions2, aes(y = subscribed_percentage, 
+                      x = started_month_nm, fill = subscription))+ 
+  geom_bar(stat = "summary")+
+  facet_wrap(~ subscription, ncol= 1)+
+  labs(title = "Subscriptions by Month",
+       x = NULL,
+       y = '%') +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    plot.caption = element_text(face = 'italic'),
+    panel.grid.major = element_line('white', size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.ontop = TRUE
+  )
+
+#ggsave("3_subscription_sales_by_subscription_type.jpg", width = 16, height = 16, units = "cm")
+```
+
+## 2) Subscription cancellations
+
+### Average subscription usage period of each subscription type.
+
+```{r}
+usage <- df %>% group_by(subscription) %>% summarise(average_usage_days = mean(usage_days))
+#usage
+
+ggplot(usage, aes(x = reorder(subscription, -average_usage_days), y = average_usage_days)) +
+  geom_bar(stat = "summary", fun = "mean") +
+  labs(title = "Average Usage Days",
+       x = NULL,
+       y = "Days")+
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    plot.caption = element_text(face = 'italic'),
+    panel.grid.major = element_line('white', size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.ontop = TRUE
+  )
+
+#ggsave("4_", width = 16, height = 16, units = "cm")
+```
+This indicate that only 'Plus-monthly' and 'Growth-monthly' subscribers use the service comparatively longer than other subscription types.
+But still the average usage duration is less than 50 days.
+
+### Spread of subscription usage period by each subscription type.
+
+```{r}
+ggplot(df) + 
+  geom_boxplot(aes(x = usage_days, y = subscription, fill = subscription))+
+  #scale_x_continuous(limits = c(0, 5000)) + 
+  labs(title = "Usage Distribution",
+       x = "Usage Days",
+       y = NULL) +
+  theme_minimal() +
+  theme(legend.position="none")
+
+#ggsave("5_subscription_usage_distribution.jpg", width = 16, height = 12, units = "cm")
+```
+This indicate that 'Plus-monthly', 'Growth-monthly' and 'Plus-yearly' subscription types shows wider usage spread.
+It would be easy to understand view subscription cancellation percentages by usage months for each subscription type.
+
+### Subscription cancellation percenages by period of months
+
+Filter subscription types with minimum 100 subscribers.
+```{r}
+# Alter data
+min_usage <- df %>% filter((subscription == 'Growth-monthly')|
+                                       (subscription == 'Plus-monthly')|
+                                       (subscription == 'Plus-yearly')) %>%
+  group_by(subscription, usage_months) %>% 
+  count() %>% 
+  arrange(subscription, usage_months)
+ 
+min_usage = min_usage %>% mutate(
+  cancel_percentage = case_when(subscription == "Growth-monthly"~ n/growth_m_sum*100,
+                                subscription == "Plus-monthly"~ n/ plus_m_sum * 100,
+                                subscription == "Plus-yearly"~ n/plus_y_sum * 100)
+ )
+
+min_usage = min_usage %>% mutate(
+  cancellation_type = case_when(usage_months == 0~ "Same Day",
+                                usage_months <= 1~ "Within 1 Month",
+                                usage_months <= 2~ "Within 2 Months",
+                                usage_months <= 3~ "Within 3 Months",
+                                usage_months <= 4~ "Within 4 Months",
+                                usage_months <= 5~ "Within 5 Months",
+                                usage_months <= 6~ "Within 6 Months",
+                                usage_months <= 7~ "Within 7 Months")
+ )
+
+# Verify percentages
+
+test <- min_usage %>% filter(subscription == "Growth-monthly") 
+test
+sum(test$cancel_percentage)
+
+test <- min_usage %>% filter(subscription == "Plus-monthly") 
+test
+sum(test$cancel_percentage)
+
+test <- min_usage %>% filter(subscription == "Plus-yearly") 
+test
+sum(test$cancel_percentage)
+```
+
+```{r}
+ggplot(min_usage, aes(y = cancel_percentage, 
+                      x = cancellation_type))+ 
+  geom_bar(stat = "summary")+
+  facet_wrap(~ subscription, ncol= 1)+
+  labs(title = "Subscription Cancellations",
+       x = NULL,
+       y = 'Percentage') +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)
+  )
+```
+This shows subscription cancellation percentages for each subscription type by usage period.
+But this is not the perfect view to present inside.
+
+Note: There are considerable percentage of same day cancellations for "Plus-yearly" subscription type.
+
+I want to show how sooner the business looses their subscribers.
+It would be more useful to use cumulative subscription cancellation percentage rather than individual percentages by usage period.
+
+### Cumulative subscription cancellation percentages by period of months
+
+Overall subscription cancellations
+
+```{r}
+min_usage2 <- df %>% filter((subscription == 'Growth-monthly')|
+                            (subscription == 'Plus-monthly')|
+                            (subscription == 'Plus-yearly')) %>%
+  group_by(subscription, usage_months) %>%
+  summarise(proportion = n()) %>%
+  mutate(Perc = cumsum(100*proportion/sum(proportion))) %>%
+  select(-proportion)
+
+ggplot(min_usage2, aes(y = Perc, 
+                      x = usage_months))+ 
+  geom_point(stat = "summary") + 
+  geom_line(stat = "summary") + 
+  geom_vline(xintercept = 4, size = 4, alpha = 0.15) + 
+  geom_vline(xintercept = 0, size = 4, alpha = 0.15) + 
+  labs(title = "Subscription Cancellations",
+       x = 'Usage Months',
+       y = 'Cancellations %') +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+  )
+
+ggsave("6_overall_subscription_cancellations.jpg", width = 16, height = 12, units = "cm")
+```
+This shows that,
+Overall the business looses almost 100% of the subscribers after 4 months
+There is about 6-8% same day cancellation subscribers.
+
+### Cumulative subscription cancellation percentages by period of months per each subscription type
+
+
+```{r}
+min_usage3 <- df %>% filter((subscription == 'Growth-monthly')|
+                            (subscription == 'Plus-monthly')|
+                            (subscription == 'Plus-yearly')) %>%
+  group_by(subscription, usage_months) %>%
+  summarise(proportion = n()) %>%
+  mutate(Perc = cumsum(100*proportion/sum(proportion))) %>%
+  select(-proportion)
+
+
+min_usage3
+```
+```{r}
+ggplot(min_usage3, aes(y = Perc, 
+                      x = usage_months))+ 
+  geom_point(stat = "summary")+
+  geom_line(stat = "summary")+
+  facet_wrap(~ subscription, ncol= 1)+
+  labs(title = "Subscription Cancellations",
+       x = NULL,
+       y = 'Percentage') +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+  )
+```
+This shows the cumulative cancellation percentages by each subscription type. 
+It is noticeable that 'Plus-yearly' package losses its subscribers more sooner than other two types.
+
+But still this does not show gives the seriousness of the issue.
+It would be better to look at things in a different angle.
+It will give a strong message if I show how long it will take to loose a certain percentage of subscribers.
+
+
+### Time duration to loose 90% of subscribers per each subscription type
+
+```{r}
+loss_3_months <- min_usage2 %>% filter(usage_months <= 3)  %>% slice_max(Perc)
+loss_3_months
+```
+```{r}
+months_90_cancellations <- min_usage2 %>% filter(Perc >= 89) %>% slice(1) # 89% rounded up to 90%
+months_90_cancellations
+```
+
+
+```{r}
+ggplot(months_90_cancellations, aes(y = subscription, 
+                      x = usage_months))+ 
+  geom_bar(stat = "summary")+
+  #geom_text(aes(label = usage_months), colour = "white", hjust = 3)+ #paste0(seq(0, 0.6, by = 0.1), "%")
+  geom_text(aes(label = paste0(usage_months, " month")), colour = "white", hjust = 1.5)+ 
+  labs(title = "Duration to Lose 90% Subscribers",
+       #x = 'Months',
+       x = NULL,
+       y = NULL) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = 'bold', hjust = 0),
+    plot.caption = element_text(face = 'italic'),
+    panel.grid.major = element_line('white', size = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.ontop = FALSE
+  )
+
+#ggsave("7_duration_90_percent_lose_subscribers.jpg", width = 12, height = 8, units = "cm")
+```
+This plots is more meaningful.
+
+'Plus-yearly' subscription type looses 90% of their subscribers just within 1 month.
+
+Both 'Plus-monthly' and 'Growth-monthly' subscription packages looses 90% of their subscribers within 3 months.
+
